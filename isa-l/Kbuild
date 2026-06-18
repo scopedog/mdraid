@@ -1,0 +1,60 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# Builds three out-of-tree modules:
+#   isal_lib.ko   - shared ec_base + gfni_glue + GFNI kernels; exports the
+#                   primitives.  Must be loaded before its consumers.
+#   isal_test.ko  - smoke-test of the *_base + GFNI primitives via the
+#                   isal_lib symbols.
+#   raid_isal.ko  - overrides raid6_call.gen_syndrome / xor_syndrome
+#                   with GFNI implementations using isal_lib's exports.
+#
+# Loading order on a fresh boot:
+#   insmod isal_lib.ko
+#   insmod raid_isal.ko       # or isal_test.ko, or kmec.ko
+
+obj-m            += isal_lib.o
+isal_lib-y       := lib_main.o ec_base.o gfni_glue.o
+isal_lib-y       += gf_vect_dot_prod_avx2_gfni.o
+isal_lib-y       += gf_2vect_dot_prod_avx2_gfni.o
+isal_lib-y       += gf_3vect_dot_prod_avx2_gfni.o
+isal_lib-y       += gf_vect_dot_prod_avx512_gfni.o
+isal_lib-y       += gf_2vect_dot_prod_avx512_gfni.o
+isal_lib-y       += gf_3vect_dot_prod_avx512_gfni.o
+isal_lib-y       += gf_4vect_dot_prod_avx512_gfni.o
+isal_lib-y       += gf_5vect_dot_prod_avx512_gfni.o
+isal_lib-y       += gf_6vect_dot_prod_avx512_gfni.o
+isal_lib-y       += gf_vect_mad_avx2_gfni.o
+isal_lib-y       += gf_2vect_mad_avx2_gfni.o
+isal_lib-y       += gf_2vect_mad_avx512_gfni.o
+
+obj-m            += isal_test.o
+isal_test-y      := test_main.o
+
+obj-m            += raid_isal.o
+raid_isal-y      := raid6_isal.o
+
+# The GFNI kernels above are C intrinsics (gf2p8affine), not NASM. They need
+# two build tweaks the rest of the kernel build doesn't:
+#   -isystem <gcc include>   : kbuild uses -nostdinc, which hides GCC's own
+#                              immintrin.h; restore just that search dir.
+#   -D_MM_MALLOC_H_INCLUDED  : immintrin.h -> xmmintrin.h -> mm_malloc.h does
+#                              `#include <stdlib.h>` (absent in-kernel); we
+#                              never use _mm_malloc, so short-circuit its guard.
+# Per-object so the intrinsic headers don't leak into ec_base.c / glue.
+# Codegen is enabled per-function via __attribute__((target("avx2/avx512,gfni"))),
+# so no global -mavx* is needed.  NASM is no longer a build dependency.
+ISAL_GFNI_INC    := $(shell $(CC) -print-file-name=include)
+ISAL_GFNI_CFLAGS := -isystem $(ISAL_GFNI_INC) -D_MM_MALLOC_H_INCLUDED
+
+CFLAGS_gf_vect_dot_prod_avx2_gfni.o    += $(ISAL_GFNI_CFLAGS)
+CFLAGS_gf_2vect_dot_prod_avx2_gfni.o   += $(ISAL_GFNI_CFLAGS)
+CFLAGS_gf_3vect_dot_prod_avx2_gfni.o   += $(ISAL_GFNI_CFLAGS)
+CFLAGS_gf_vect_dot_prod_avx512_gfni.o  += $(ISAL_GFNI_CFLAGS)
+CFLAGS_gf_2vect_dot_prod_avx512_gfni.o += $(ISAL_GFNI_CFLAGS)
+CFLAGS_gf_3vect_dot_prod_avx512_gfni.o += $(ISAL_GFNI_CFLAGS)
+CFLAGS_gf_4vect_dot_prod_avx512_gfni.o += $(ISAL_GFNI_CFLAGS)
+CFLAGS_gf_5vect_dot_prod_avx512_gfni.o += $(ISAL_GFNI_CFLAGS)
+CFLAGS_gf_6vect_dot_prod_avx512_gfni.o += $(ISAL_GFNI_CFLAGS)
+CFLAGS_gf_vect_mad_avx2_gfni.o         += $(ISAL_GFNI_CFLAGS)
+CFLAGS_gf_2vect_mad_avx2_gfni.o        += $(ISAL_GFNI_CFLAGS)
+CFLAGS_gf_2vect_mad_avx512_gfni.o      += $(ISAL_GFNI_CFLAGS)

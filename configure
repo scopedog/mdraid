@@ -1,0 +1,65 @@
+#!/bin/sh
+# Check prerequisites for building mdraid out-of-tree modules.
+# Usage: ./configure [--kver VERSION] [--kdir PATH]
+#
+# Sets KVER and KDIR, then verifies that kernel headers and build tools
+# are present.  Exits non-zero if anything is missing.
+
+set -e
+
+KVER="${KVER:-$(uname -r)}"
+KDIR="${KDIR:-/lib/modules/${KVER}/build}"
+
+# Parse command-line overrides
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --kver) KVER="$2"; KDIR="/lib/modules/${KVER}/build"; shift 2 ;;
+        --kdir) KDIR="$2"; shift 2 ;;
+        *) echo "Usage: $0 [--kver VERSION] [--kdir PATH]" >&2; exit 1 ;;
+    esac
+done
+
+ok()  { printf '  %-40s OK\n'      "$1"; }
+fail(){ printf '  %-40s MISSING\n' "$1"; FAILED=1; }
+
+FAILED=0
+
+echo "Checking build prerequisites for mdraid"
+echo "  Kernel version : $KVER"
+echo "  Kernel build dir: $KDIR"
+echo ""
+
+# --- tools ---
+command -v make  >/dev/null 2>&1 && ok "make"              || fail "make"
+command -v gcc   >/dev/null 2>&1 && ok "gcc"               || fail "gcc"
+command -v perl  >/dev/null 2>&1 && ok "perl (kbuild scripts)" || fail "perl (kbuild scripts)"
+
+# --- kernel headers ---
+if [ -f "${KDIR}/Makefile" ]; then
+    ok "kernel build dir (${KDIR})"
+else
+    fail "kernel build dir (${KDIR})"
+    echo ""
+    echo "Install kernel headers, e.g.:"
+    echo "  RHEL/CentOS:  sudo dnf install kernel-devel-${KVER}"
+    echo "  Debian/Ubuntu: sudo apt install linux-headers-${KVER}"
+fi
+
+# --- minimum version check (6.12) ---
+KMAJ=$(echo "$KVER" | cut -d. -f1)
+KMIN=$(echo "$KVER" | cut -d. -f2)
+if [ "$KMAJ" -gt 6 ] || { [ "$KMAJ" -eq 6 ] && [ "$KMIN" -ge 12 ]; }; then
+    ok "kernel version >= 6.12"
+else
+    fail "kernel version >= 6.12 (found ${KMAJ}.${KMIN})"
+fi
+
+echo ""
+if [ "$FAILED" -eq 0 ]; then
+    echo "All checks passed.  Run:"
+    echo "  make KVER=${KVER}"
+    echo "  sudo make install KVER=${KVER}"
+else
+    echo "One or more checks failed.  Resolve the issues above before building."
+    exit 1
+fi
