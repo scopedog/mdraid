@@ -6,7 +6,7 @@
  * is everything that drags in isal_api.h.
  *
  * Vendored from
- * https://github.com/scopedog/isa-l/blob/master/include/erasure_code.h
+ * https://github.com/TheLustreCollective/isa-l/blob/master/include/erasure_code.h
  */
 
 #ifndef _ISA_L_EC_H_

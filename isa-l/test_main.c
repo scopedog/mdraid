@@ -392,4 +392,4 @@ module_exit(isal_test_exit);
 
 MODULE_LICENSE("GPL v2");
 MODULE_DESCRIPTION("Smoke test for vendored ISA-L *_base path in a kernel module");
-MODULE_AUTHOR("Hiroshi Nishida");
+MODULE_AUTHOR("The Lustre Collective");

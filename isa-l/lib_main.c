@@ -92,4 +92,4 @@ module_exit(isal_lib_exit);
 
 MODULE_LICENSE("GPL v2");
 MODULE_DESCRIPTION("Shared ISA-L primitives (base + GFNI) for raid_isal/kmec");
-MODULE_AUTHOR("Hiroshi Nishida");
+MODULE_AUTHOR("The Lustre Collective");

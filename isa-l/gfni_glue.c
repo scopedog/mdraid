@@ -10,7 +10,7 @@
  *   already verified isal_have_gfni() returns true.
  *
  * gf_vect_mul_init_gfni and ec_init_tables_gfni are vendored from
- * https://github.com/scopedog/isa-l/blob/master/erasure_code/ec_highlevel_func.c
+ * https://github.com/TheLustreCollective/isa-l/blob/master/erasure_code/ec_highlevel_func.c
  */
 
 #include <linux/types.h>

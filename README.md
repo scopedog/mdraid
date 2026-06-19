@@ -2,9 +2,9 @@
 
 > **Build note:** This is one component of the raidkm mdraid stack and is not
 > meant to be built on its own. Please use
-> [mdraid-super](https://github.com/scopedog/mdraid-super) to build the entire
-> package — it assembles this repo together with the other components in the
-> correct order.
+> [mdraid-super](https://github.com/TheLustreCollective/mdraid-super) to build
+> the entire package — it assembles this repo together with the other
+> components in the correct order.
 
 Out-of-tree Linux kernel module with targeted improvements to `drivers/md/`
 (md, raid5, raid6), focused on RAID-5/6 performance and rebuild throughput for
@@ -19,8 +19,8 @@ override for raid6 syndrome (verified byte-identical against the
 in-tree implementation at module load time).
 
 For arbitrary k+m Reed-Solomon erasure coding (m > 2) — the layout
-needed for high-durability storage — see the companion repo
-[md-kmec](https://github.com/scopedog/md-kmec). md-kmec
+needed for high-durability Lustre OSTs — see the companion repo
+[md-kmec](https://github.com/TheLustreCollective/md-kmec). md-kmec
 is *not* on-disk compatible with stock mdraid (it adds a new md
 personality, level=70) and consumes `isal_lib.ko` exported from
 this tree.
@@ -197,7 +197,7 @@ writeup for design and end-to-end test results.
 
 The k+m Reed-Solomon md personality (`kmec.ko`) that consumes the
 GFNI primitives exported by `isal_lib.ko` lives in its own repo:
-[scopedog/md-kmec](https://github.com/scopedog/md-kmec).
+[TheLustreCollective/md-kmec](https://github.com/TheLustreCollective/md-kmec).
 Build mdraid first, then md-kmec — kmec picks up `isal_lib.ko`'s
 exports from this tree.
 

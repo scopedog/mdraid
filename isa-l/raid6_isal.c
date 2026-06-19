@@ -806,4 +806,4 @@ module_exit(raid6_isal_exit);
 
 MODULE_LICENSE("GPL v2");
 MODULE_DESCRIPTION("ISA-L GFNI gen_syndrome + recov override for in-tree raid6");
-MODULE_AUTHOR("Hiroshi Nishida");
+MODULE_AUTHOR("The Lustre Collective");
