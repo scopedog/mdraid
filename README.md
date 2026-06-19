@@ -1,5 +1,11 @@
 # mdraid
 
+> **Build note:** This is one component of the raidkm mdraid stack and is not
+> meant to be built on its own. Please use
+> [mdraid-super](https://github.com/scopedog/mdraid-super) to build the entire
+> package — it assembles this repo together with the other components in the
+> correct order.
+
 Out-of-tree Linux kernel module with targeted improvements to `drivers/md/`
 (md, raid5, raid6), focused on RAID-5/6 performance and rebuild throughput for
 modern storage.
