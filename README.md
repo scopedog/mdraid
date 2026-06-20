@@ -2,7 +2,7 @@
 
 > **Build note:** This is one component of the raidkm mdraid stack and is not
 > meant to be built on its own. Please use
-> [mdraid-super](https://github.com/TheLustreCollective/mdraid-super) to build
+> [mdraid-super](https://github.com/scopedog/mdraid-super) to build
 > the entire package — it assembles this repo together with the other
 > components in the correct order.
 
@@ -19,8 +19,8 @@ override for raid6 syndrome (verified byte-identical against the
 in-tree implementation at module load time).
 
 For arbitrary k+m Reed-Solomon erasure coding (m > 2) — the layout
-needed for high-durability Lustre OSTs — see the companion repo
-[md-kmec](https://github.com/TheLustreCollective/md-kmec). md-kmec
+needed for high-durability storage targets — see the companion repo
+[md-kmec](https://github.com/scopedog/md-kmec). md-kmec
 is *not* on-disk compatible with stock mdraid (it adds a new md
 personality, level=70) and consumes `isal_lib.ko` exported from
 this tree.
@@ -197,7 +197,7 @@ writeup for design and end-to-end test results.
 
 The k+m Reed-Solomon md personality (`kmec.ko`) that consumes the
 GFNI primitives exported by `isal_lib.ko` lives in its own repo:
-[TheLustreCollective/md-kmec](https://github.com/TheLustreCollective/md-kmec).
+[scopedog/md-kmec](https://github.com/scopedog/md-kmec).
 Build mdraid first, then md-kmec — kmec picks up `isal_lib.ko`'s
 exports from this tree.
 
