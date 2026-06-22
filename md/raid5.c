@@ -7270,8 +7270,12 @@ raid5_store_group_thread_cnt(struct mddev *mddev, const char *page, size_t len)
 			conf->worker_groups = new_groups;
 			spin_unlock_irq(&conf->device_lock);
 
-			if (old_groups)
-				kfree(old_groups[0].workers);
+			if (old_groups) {
+				int node;
+
+				for (node = 0; node < num_possible_nodes(); node++)
+					kfree(old_groups[node].workers);
+			}
 			kfree(old_groups);
 		}
 	}
