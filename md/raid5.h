@@ -520,8 +520,11 @@ struct disk_info {
 #define BYPASS_THRESHOLD	1
 #define NR_HASH			(PAGE_SIZE / sizeof(struct hlist_head))
 #define HASH_MASK		(NR_HASH - 1)
-#define MAX_STRIPE_BATCH	32	/* stripes per handle_active_stripes pass */
-#define STRIPE_BATCH_WORKERS	8	/* stripes-per-worker threshold for spawning */
+#define MAX_STRIPE_BATCH	8	/* stripes per handle_active_stripes pass;
+					 * also the worker-spawn divisor.  Measured
+					 * 2026-06-24: raising to 32 only helps deep
+					 * queues (QD > 32*gtc) and is a ~2x loss on
+					 * moderate queues -- keep coupled at 8. */
 #define RAID5_SYNC_WINDOW	128	/* stripes to pre-submit per sync_request call */
 #define RAID5_SYNC_HWMARK	2	/* rebuild uses at most 1/N of stripe cache */
 
