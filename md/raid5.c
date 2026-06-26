@@ -3434,10 +3434,15 @@ schedule_reconstruction(struct stripe_head *sh, struct stripe_head_state *s,
 
 		set_bit(STRIPE_OP_RECONSTRUCT, &s->ops_request);
 
-		if (s->locked + conf->max_degraded == disks)
+		if (s->locked + conf->max_degraded == disks) {
 			if (!test_and_set_bit(STRIPE_FULL_WRITE, &sh->state))
 				atomic_inc(&conf->pending_full_writes);
+			atomic_long_inc(&conf->stat_full_write);
+		} else {
+			atomic_long_inc(&conf->stat_rcw);
+		}
 	} else {
+		atomic_long_inc(&conf->stat_rmw);
 		BUG_ON(!(test_bit(R5_UPTODATE, &sh->dev[pd_idx].flags) ||
 			test_bit(R5_Wantcompute, &sh->dev[pd_idx].flags)));
 		BUG_ON(level == 6 &&
@@ -4297,6 +4302,7 @@ static int handle_stripe_dirtying(struct r5conf *conf,
 					set_bit(R5_LOCKED, &dev->flags);
 					set_bit(R5_Wantread, &dev->flags);
 					s->locked++;
+					atomic_long_inc(&conf->stat_w_preread);
 				} else
 					set_bit(STRIPE_DELAYED, &sh->state);
 			}
@@ -4323,6 +4329,7 @@ static int handle_stripe_dirtying(struct r5conf *conf,
 					set_bit(R5_Wantread, &dev->flags);
 					s->locked++;
 					qread++;
+					atomic_long_inc(&conf->stat_w_preread);
 				} else
 					set_bit(STRIPE_DELAYED, &sh->state);
 			}
@@ -7235,6 +7242,39 @@ static struct md_sysfs_entry
 raid5_stripecache_active = __ATTR_RO(stripe_cache_active);
 
 static ssize_t
+raid5_write_stats_show(struct mddev *mddev, char *page)
+{
+	struct r5conf *conf = mddev->private;
+
+	if (!conf)
+		return 0;
+	return sprintf(page, "full %lu rcw %lu rmw %lu w_preread %lu\n",
+		       (unsigned long)atomic_long_read(&conf->stat_full_write),
+		       (unsigned long)atomic_long_read(&conf->stat_rcw),
+		       (unsigned long)atomic_long_read(&conf->stat_rmw),
+		       (unsigned long)atomic_long_read(&conf->stat_w_preread));
+}
+
+/* Any write resets the counters, for per-workload characterization. */
+static ssize_t
+raid5_write_stats_store(struct mddev *mddev, const char *page, size_t len)
+{
+	struct r5conf *conf = mddev->private;
+
+	if (conf) {
+		atomic_long_set(&conf->stat_full_write, 0);
+		atomic_long_set(&conf->stat_rcw, 0);
+		atomic_long_set(&conf->stat_rmw, 0);
+		atomic_long_set(&conf->stat_w_preread, 0);
+	}
+	return len;
+}
+
+static struct md_sysfs_entry
+raid5_write_stats = __ATTR(write_stats, S_IRUGO | S_IWUSR,
+			   raid5_write_stats_show, raid5_write_stats_store);
+
+static ssize_t
 raid5_show_group_thread_cnt(struct mddev *mddev, char *page)
 {
 	struct r5conf *conf;
@@ -7309,6 +7349,7 @@ raid5_group_thread_cnt = __ATTR(group_thread_cnt, S_IRUGO | S_IWUSR,
 static struct attribute *raid5_attrs[] =  {
 	&raid5_stripecache_size.attr,
 	&raid5_stripecache_active.attr,
+	&raid5_write_stats.attr,
 	&raid5_preread_bypass_threshold.attr,
 	&raid5_group_thread_cnt.attr,
 	&raid5_skip_copy.attr,

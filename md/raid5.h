@@ -655,6 +655,18 @@ struct r5conf {
 	atomic_t		preread_active_stripes; /* stripes with scheduled io */
 	atomic_t		active_aligned_reads;
 	atomic_t		pending_full_writes; /* full write backlog */
+	/*
+	 * Write-method characterization counters (RMW Phase 0).  Per write
+	 * dispatch in schedule_reconstruction(); read+reset via the
+	 * "write_stats" sysfs attribute.  full = full-stripe writes (no
+	 * pre-reads, parity computed once over the whole stripe); rcw = partial
+	 * reconstruct-writes; rmw = read-modify-writes; w_preread = blocks read
+	 * solely to service a write (the read amplification).
+	 */
+	atomic_long_t		stat_full_write;
+	atomic_long_t		stat_rcw;
+	atomic_long_t		stat_rmw;
+	atomic_long_t		stat_w_preread;
 	int			bypass_count; /* bypassed prereads */
 	int			bypass_threshold; /* preread nice */
 	int			skip_copy; /* Don't copy data from bio to stripe cache */
