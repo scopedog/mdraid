@@ -126,10 +126,10 @@ static void raid6_avx5121_xor_syndrome(int disks, int start, int stop,
 				     "vpmovm2b %%k1,%%zmm5\n\t"
 				     "vpaddb %%zmm4,%%zmm4,%%zmm4\n\t"
 				     "vpandq %%zmm0,%%zmm5,%%zmm5\n\t"
-				     "vpxorq %%zmm5,%%zmm4,%%zmm4\n\t"
-				     "vmovdqa64 %0,%%zmm5\n\t"
-				     "vpxorq %%zmm5,%%zmm2,%%zmm2\n\t"
-				     "vpxorq %%zmm5,%%zmm4,%%zmm4"
+				     "vmovdqa64 %0,%%zmm6\n\t"
+				     "vpxorq %%zmm6,%%zmm2,%%zmm2\n\t"
+				     /* Q = Q ^ poly ^ D folded; D in spare zmm6 so poly survives */
+				     "vpternlogq $0x96,%%zmm5,%%zmm6,%%zmm4"
 				     :
 				     : "m" (dptr[z][d]));
 		}
@@ -266,14 +266,13 @@ static void raid6_avx5122_xor_syndrome(int disks, int start, int stop,
 				     "vpaddb %%zmm6,%%zmm6,%%zmm6\n\t"
 				     "vpandq %%zmm0,%%zmm5,%%zmm5\n\t"
 				     "vpandq %%zmm0,%%zmm7,%%zmm7\n\t"
-				     "vpxorq %%zmm5,%%zmm4,%%zmm4\n\t"
-				     "vpxorq %%zmm7,%%zmm6,%%zmm6\n\t"
-				     "vmovdqa64 %0,%%zmm5\n\t"
-				     "vmovdqa64 %1,%%zmm7\n\t"
-				     "vpxorq %%zmm5,%%zmm2,%%zmm2\n\t"
-				     "vpxorq %%zmm7,%%zmm3,%%zmm3\n\t"
-				     "vpxorq %%zmm5,%%zmm4,%%zmm4\n\t"
-				     "vpxorq %%zmm7,%%zmm6,%%zmm6"
+				     "vmovdqa64 %0,%%zmm8\n\t"
+				     "vmovdqa64 %1,%%zmm9\n\t"
+				     "vpxorq %%zmm8,%%zmm2,%%zmm2\n\t"
+				     "vpxorq %%zmm9,%%zmm3,%%zmm3\n\t"
+				     /* Q ^= poly ^ D folded; D kept in zmm8/9 so poly survives */
+				     "vpternlogq $0x96,%%zmm5,%%zmm8,%%zmm4\n\t"
+				     "vpternlogq $0x96,%%zmm7,%%zmm9,%%zmm6"
 				     :
 				     : "m" (dptr[z][d]),  "m" (dptr[z][d+64]));
 		}
@@ -473,22 +472,19 @@ static void raid6_avx5124_xor_syndrome(int disks, int start, int stop,
 				     "vpandq %%zmm0,%%zmm7,%%zmm7\n\t"
 				     "vpandq %%zmm0,%%zmm13,%%zmm13\n\t"
 				     "vpandq %%zmm0,%%zmm15,%%zmm15\n\t"
-				     "vpxorq %%zmm5,%%zmm4,%%zmm4\n\t"
-				     "vpxorq %%zmm7,%%zmm6,%%zmm6\n\t"
-				     "vpxorq %%zmm13,%%zmm12,%%zmm12\n\t"
-				     "vpxorq %%zmm15,%%zmm14,%%zmm14\n\t"
-				     "vmovdqa64 %0,%%zmm5\n\t"
-				     "vmovdqa64 %1,%%zmm7\n\t"
-				     "vmovdqa64 %2,%%zmm13\n\t"
-				     "vmovdqa64 %3,%%zmm15\n\t"
-				     "vpxorq %%zmm5,%%zmm2,%%zmm2\n\t"
-				     "vpxorq %%zmm7,%%zmm3,%%zmm3\n\t"
-				     "vpxorq %%zmm13,%%zmm10,%%zmm10\n\t"
-				     "vpxorq %%zmm15,%%zmm11,%%zmm11\n\t"
-				     "vpxorq %%zmm5,%%zmm4,%%zmm4\n\t"
-				     "vpxorq %%zmm7,%%zmm6,%%zmm6\n\t"
-				     "vpxorq %%zmm13,%%zmm12,%%zmm12\n\t"
-				     "vpxorq %%zmm15,%%zmm14,%%zmm14"
+				     "vmovdqa64 %0,%%zmm8\n\t"
+				     "vmovdqa64 %1,%%zmm9\n\t"
+				     "vmovdqa64 %2,%%zmm16\n\t"
+				     "vmovdqa64 %3,%%zmm17\n\t"
+				     "vpxorq %%zmm8,%%zmm2,%%zmm2\n\t"
+				     "vpxorq %%zmm9,%%zmm3,%%zmm3\n\t"
+				     "vpxorq %%zmm16,%%zmm10,%%zmm10\n\t"
+				     "vpxorq %%zmm17,%%zmm11,%%zmm11\n\t"
+				     /* Q ^= poly ^ D folded; D in zmm8/9/16/17 so poly survives */
+				     "vpternlogq $0x96,%%zmm5,%%zmm8,%%zmm4\n\t"
+				     "vpternlogq $0x96,%%zmm7,%%zmm9,%%zmm6\n\t"
+				     "vpternlogq $0x96,%%zmm13,%%zmm16,%%zmm12\n\t"
+				     "vpternlogq $0x96,%%zmm15,%%zmm17,%%zmm14"
 				     :
 				     : "m" (dptr[z][d]), "m" (dptr[z][d+64]),
 				       "m" (dptr[z][d+128]),
