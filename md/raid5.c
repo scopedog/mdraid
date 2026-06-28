@@ -7906,6 +7906,18 @@ static int raid5_set_limits(struct mddev *mddev)
 	lim.io_min = mddev->chunk_sectors << 9;
 	lim.io_opt = lim.io_min * (conf->raid_disks - conf->max_degraded);
 	lim.features |= BLK_FEAT_RAID_PARTIAL_STRIPES_EXPENSIVE;
+
+	/*
+	 * Default to zero-copy writes (skip_copy).  For a full-page-aligned
+	 * write we alias the stripe-cache page directly to the incoming bio
+	 * page instead of memcpy'ing it in via biodrain, which is the dominant
+	 * non-EC cost on full-stripe writes (~+36% on a wide CPU-bound array).
+	 * The only requirement is stable pages, which is free for the O_DIRECT
+	 * workloads this fork targets.  Override per-array via the skip_copy
+	 * sysfs attribute.
+	 */
+	conf->skip_copy = 1;
+	lim.features |= BLK_FEAT_STABLE_WRITES;
 	lim.discard_granularity = stripe;
 	lim.max_write_zeroes_sectors = 0;
 	mddev_stack_rdev_limits(mddev, &lim, 0);

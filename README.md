@@ -53,6 +53,32 @@ Base: upstream Linux 6.12 `drivers/md/` with a RHEL 10 compatibility shim
 
 ## Benchmark results
 
+### Zero-copy writes (`skip_copy`) — now default on
+
+This fork defaults `skip_copy` on (in `raid5_set_limits`).  The md/raid5
+write path normally copies every byte of incoming write data into
+stripe-cache pages via biodrain (`async_copy_data` → `async_memcpy`) before
+computing parity and submitting; that copy — *not* the erasure coding (EC is
+~0.6 % of write-path CPU) — is the dominant cost of a full-stripe write.  With
+`skip_copy` a full-page-aligned write aliases the stripe-cache page directly to
+the incoming bio page, eliminating the copy.  The only requirement is stable
+pages (`BLK_FEAT_STABLE_WRITES`), which is free for the O_DIRECT workloads this
+fork targets; override per-array via the `skip_copy` sysfs attribute.
+
+Full-stripe sequential DIO write, 16 × brd ramdisks, raid6 14+2, 64 KiB chunk,
+on a GCP `c3-standard-22` (22 vCPU, RHEL 10.2 `6.12.0-211.16.1.el10_2`,
+`slub_debug` off), `bs=896k` = one full stripe, 3 reps:
+
+| `skip_copy` | throughput |
+|---|---|
+| **1 (default)** | **13.17 GiB/s** |
+| 0 | 9.69 GiB/s |
+
+→ **+36 %**.  The win is confined to **full-stripe** writes; on small/partial
+RMW writes the tiny copy is dwarfed by read-modify-write amplification, so
+`skip_copy` is neutral there (no regression).  `perf` confirms the biodrain
+`async_memcpy` callchain disappears when `skip_copy` is on.
+
 ### raid6 vs stock — 2026-04-28 (with #12 + #15)
 
 Comparison on an Intel i5-1340P (Raptor Lake, GFNI) running a bhyve
