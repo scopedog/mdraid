@@ -49,6 +49,7 @@ Base: upstream Linux 6.12 `drivers/md/` with a RHEL 10 compatibility shim
 | 12 | `find_get_stripe`: skip `device_lock` for idle stripes via `STRIPE_ON_INACTIVE_LIST` flag | raid5.c, raid5.h | When a `find_get_stripe()` lookup succeeds but the stripe is idle (count==0) on `inactive_list[hash]`, the unlink can be done under `hash_locks[hash]` alone — that bucket is already protected by it.  A new `STRIPE_ON_INACTIVE_LIST` state bit, set in `release_inactive_stripe_list()` right before the splice and cleared by `get_free_stripe()` / the fast path itself, distinguishes "on inactive_list" from "still on temp_inactive_list" (which would need device_lock).  Earlier device_lock-skip without the flag (commit `0706ca7`, reverted in `dc17c72`) tripped `__list_add_valid_or_report` because the state alone couldn't tell those two list locations apart. |
 | 13 | ISA-L GFNI `gen_syndrome` override via `raid_isal.ko` | isa-l/raid6_isal.c, isa-l/Kbuild | Routes RAID-6 P+Q syndrome through ISA-L's `gf_vect_dot_prod_avx2_gfni` when host CPU supports GFNI; in-tree `lib/raid6` (avx2x4 etc.) is used as a byte-for-byte reference at install time |
 | 15 | Auto-default `group_thread_cnt` for new raid4/5/6 arrays | raid5.c | Stock kernel disables Shaohua Li's r5worker groups by default (`group_thread_cnt=0`), funneling all `handle_stripe()` work through the single `raid5d` kthread which pegs ~75 % of one core under load. New arrays now start with `group_thread_cnt = min(2, num_online_cpus()/2)` so worker offload is on out of the box. Override via the `default_group_thread_cnt` module parameter (`-1` auto, `0` disabled, `N` literal). Per-array sysfs `group_thread_cnt` is unchanged. Validated on the README workload set (rd07 GFNI bhyve guest): seq-write +24 %, scrub +51 %, rebuild +34 %; rand-4K and seq-read within noise. With `raid_isal` layered on top: seq-write +11 %, scrub +31 %, rebuild +43 %. |
+| 16 | `raid5_unplug`: release plugged stripes via the lockless `released_stripes` llist instead of `device_lock` | raid5.c | `raid5_unplug()` drained the per-task plug list under the global `conf->device_lock` — one acquisition per flush — which dominates CPU under many concurrent plugging submitters (high-QD random writes with worker groups on; `perf`: `raid5_unplug → _raw_spin_unlock_irq` ~28 % of all CPU on a device-unlimited backend). Releases now go through `raid5_release_stripe()` — the lockless `released_stripes` llist drained in batches by `raid5d` + the worker threads, identical to the existing no-plug fallback in `release_stripe_plug()` — coalescing every submitter's releases and removing the per-unplug acquisition. Companion to #12 (which removed `device_lock` from the lookup/get side). **+25 % 4K-random-write throughput** on `null_blk` raid6; neutral at `group_thread_cnt=0`. No new lock or invariant. |
 
 
 ## Benchmark results
@@ -78,6 +79,45 @@ on a GCP `c3-standard-22` (22 vCPU, RHEL 10.2 `6.12.0-211.16.1.el10_2`,
 RMW writes the tiny copy is dwarfed by read-modify-write amplification, so
 `skip_copy` is neutral there (no regression).  `perf` confirms the biodrain
 `async_memcpy` callchain disappears when `skip_copy` is on.
+
+### `raid5_unplug` `device_lock` removal — random-write scaling (#16)
+
+Companion to #12 on the *submission* side: `raid5_unplug()` released every
+plugged stripe under the global `conf->device_lock`, so under many concurrent
+plugging submitters that per-flush acquisition is the dominant CPU cost.  #16
+routes those releases through the lockless `released_stripes` llist
+(`raid5_release_stripe()` — the path `release_stripe_plug()` already falls back
+to when unplugged), so all submitters' releases coalesce into a few batched
+drains by `raid5d` and the worker threads.
+
+raid6 14+2, 64 KiB chunk, `group_thread_cnt=16`, fio 4 KiB random write
+`numjobs=24 iodepth=32`, base (this fork *without* #16) vs patched, 3 interleaved
+rounds, on a GCP `n2-standard-32` (32 vCPU, 2 NUMA, RHEL 10.2
+`6.12.0-211.16.1.el10_2`).
+
+**On `null_blk` (memory-backed, device-unlimited — so the md layer, not the
+device, is the bottleneck):**
+
+| | IOPS (4K randwrite) | CPU busy |
+|---|---|---|
+| base    | 221,067 | 92 % |
+| **patched (#16)** | **276,478** | 84 % |
+
+→ **+25 % throughput at lower CPU.**  base is CPU/lock-bound at 92 %; `perf`
+shows `raid5_unplug → _raw_spin_unlock_irq` at **28 %** of all CPU on base and
+**gone** on patched (fio self-time in `_raw_spin_unlock_irq` drops **31 % →
+3.9 %**).  At the upstream default `group_thread_cnt=0` (single `raid5d`, not
+lock-bound) #16 is correctly **neutral**: 51,462 → 50,456 IOPS (**0.98×**, no
+regression).
+
+**On real NVMe (16 × GCP local SSD):** 4 KiB random write is device-IOPS-capped
+at ~199 K — which sits right at the lock ceiling — so throughput ties and the win
+appears as **CPU efficiency**: at matched `group_thread_cnt=16`, stock raid6
+sustains ~199 K at **69 % busy** while this fork holds the same ~199 K at
+**55 %** (**+26 % IOPS per %CPU**).  The faster the storage, the more the lock
+dominates (28 % of CPU on `null_blk` vs 14 % on this NVMe), so the throughput win
+grows on arrays fast enough to clear the single-lock ceiling — the `null_blk`
+number above represents that regime.
 
 ### raid6 vs stock — 2026-04-28 (with #12 + #15)
 
