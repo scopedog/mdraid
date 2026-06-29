@@ -5705,7 +5705,6 @@ again:
 struct raid5_plug_cb {
 	struct blk_plug_cb	cb;
 	struct list_head	list;
-	struct list_head	temp_inactive_list[NR_STRIPE_HASH_LOCKS];
 };
 
 static void raid5_unplug(struct blk_plug_cb *blk_cb, bool from_schedule)
@@ -5770,12 +5769,8 @@ static void release_stripe_plug(struct mddev *mddev,
 
 	cb = container_of(blk_cb, struct raid5_plug_cb, cb);
 
-	if (cb->list.next == NULL) {
-		int i;
+	if (cb->list.next == NULL)
 		INIT_LIST_HEAD(&cb->list);
-		for (i = 0; i < NR_STRIPE_HASH_LOCKS; i++)
-			INIT_LIST_HEAD(cb->temp_inactive_list + i);
-	}
 
 	if (!test_and_set_bit(STRIPE_ON_UNPLUG_LIST, &sh->state))
 		list_add_tail(&sh->lru, &cb->list);
@@ -6730,7 +6725,16 @@ static int  retry_aligned_read(struct r5conf *conf, struct bio *raid_bio,
 		}
 
 		if (!add_stripe_bio(sh, raid_bio, dd_idx, 0, 0)) {
-			raid5_release_stripe(sh);
+			int hash;
+
+			/* Upstream 7f9f7c697474 ("md/raid5: fix soft lockup in
+			 * retry_aligned_read"): release via temp_inactive_list, not
+			 * the released_stripes llist, so raid5d can break out of its
+			 * loop and handle_stripe() gets to resolve the overlap. */
+			spin_lock_irq(&conf->device_lock);
+			hash = sh->hash_lock_index;
+			__release_stripe(conf, sh, &conf->temp_inactive_list[hash]);
+			spin_unlock_irq(&conf->device_lock);
 			conf->retry_read_aligned = raid_bio;
 			conf->retry_read_offset = scnt;
 			return handled;
