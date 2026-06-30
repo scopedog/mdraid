@@ -3723,7 +3723,7 @@ handle_failed_stripe(struct r5conf *conf, struct stripe_head *sh,
 			bio_io_error(bi);
 			bi = nextbi;
 		}
-		if (bitmap_end)
+		if (bitmap_end && conf->mddev->bitmap)
 			conf->mddev->bitmap_ops->endwrite(conf->mddev,
 					sh->sector, RAID5_STRIPE_SECTORS(conf));
 		bitmap_end = 0;
@@ -3769,7 +3769,7 @@ handle_failed_stripe(struct r5conf *conf, struct stripe_head *sh,
 				bi = nextbi;
 			}
 		}
-		if (bitmap_end)
+		if (bitmap_end && conf->mddev->bitmap)
 			conf->mddev->bitmap_ops->endwrite(conf->mddev,
 					sh->sector, RAID5_STRIPE_SECTORS(conf));
 		/* If we were in the middle of a write the parity block might
@@ -4120,8 +4120,9 @@ returnbi:
 					bio_endio(wbi);
 					wbi = wbi2;
 				}
-				conf->mddev->bitmap_ops->endwrite(conf->mddev,
-					sh->sector, RAID5_STRIPE_SECTORS(conf));
+				if (conf->mddev->bitmap)
+					conf->mddev->bitmap_ops->endwrite(conf->mddev,
+						sh->sector, RAID5_STRIPE_SECTORS(conf));
 				if (head_sh->batch_head) {
 					sh = list_first_entry(&sh->batch_list,
 							      struct stripe_head,
@@ -6564,12 +6565,22 @@ static sector_t raid5_sync_request(struct mddev *mddev, sector_t sector_nr,
 			return 0;
 		}
 
-		if (mddev->curr_resync < max_sector) /* aborted */
-			mddev->bitmap_ops->end_sync(mddev, mddev->curr_resync,
-						    &sync_blocks);
-		else /* completed sync */
+		/* RHEL 10.2 port fix #9: the builtin md core's bitmap_ops sync
+		 * helpers (start_sync / cond_end_sync / end_sync / close_sync)
+		 * dereference mddev->bitmap *without* a NULL guard (verified by
+		 * disassembling the running bitmap_start_sync: it loads
+		 * mddev->bitmap and calls _raw_spin_lock_irq on it with no NULL
+		 * check).  An array made with --bitmap=none -- or too small for
+		 * an auto bitmap -- has mddev->bitmap == NULL, so these panic
+		 * during resync.  Gate them on the bitmap existing. */
+		if (mddev->curr_resync < max_sector) { /* aborted */
+			if (mddev->bitmap)
+				mddev->bitmap_ops->end_sync(mddev,
+						mddev->curr_resync, &sync_blocks);
+		} else /* completed sync */
 			conf->fullsync = 0;
-		mddev->bitmap_ops->close_sync(mddev);
+		if (mddev->bitmap)
+			mddev->bitmap_ops->close_sync(mddev);
 
 		return 0;
 	}
@@ -6596,7 +6607,11 @@ static sector_t raid5_sync_request(struct mddev *mddev, sector_t sector_nr,
 		*skipped = 1;
 		return rv;
 	}
-	if (!test_bit(MD_RECOVERY_REQUESTED, &mddev->recovery) &&
+	/* fix #9 (cont.): only consult the bitmap when one exists; without
+	 * a bitmap start_sync would conceptually "always resync", so the
+	 * skip-block optimisation simply does not apply. */
+	if (mddev->bitmap &&
+	    !test_bit(MD_RECOVERY_REQUESTED, &mddev->recovery) &&
 	    !conf->fullsync &&
 	    !mddev->bitmap_ops->start_sync(mddev, sector_nr, &sync_blocks,
 					   true) &&
@@ -6608,7 +6623,8 @@ static sector_t raid5_sync_request(struct mddev *mddev, sector_t sector_nr,
 		return sync_blocks * RAID5_STRIPE_SECTORS(conf);
 	}
 
-	mddev->bitmap_ops->cond_end_sync(mddev, sector_nr, false);
+	if (mddev->bitmap)
+		mddev->bitmap_ops->cond_end_sync(mddev, sector_nr, false);
 
 	/* First stripe: block if stripe cache is full, then throttle. */
 	sh = raid5_get_active_stripe(conf, NULL, sector_nr, R5_GAS_NOBLOCK);
@@ -6631,8 +6647,9 @@ static sector_t raid5_sync_request(struct mddev *mddev, sector_t sector_nr,
 		if (rdev == NULL || test_bit(Faulty, &rdev->flags))
 			still_degraded = true;
 	}
-	mddev->bitmap_ops->start_sync(mddev, sector_nr, &sync_blocks,
-				      still_degraded);
+	if (mddev->bitmap)
+		mddev->bitmap_ops->start_sync(mddev, sector_nr, &sync_blocks,
+					      still_degraded);
 	set_bit(STRIPE_SYNC_REQUESTED, &sh->state);
 	set_bit(STRIPE_HANDLE, &sh->state);
 	raid5_release_stripe(sh);
@@ -6668,7 +6685,8 @@ static sector_t raid5_sync_request(struct mddev *mddev, sector_t sector_nr,
 		 * stripes.  (The next sync_request call skips the clean run via
 		 * the bitmap check at the top of this function.)
 		 */
-		if (!mddev->bitmap_ops->start_sync(mddev, win_sector,
+		if (mddev->bitmap &&
+		    !mddev->bitmap_ops->start_sync(mddev, win_sector,
 						   &sync_blocks, still_degraded)) {
 			raid5_release_stripe(sh);
 			break;
@@ -8522,9 +8540,11 @@ static int raid5_resize(struct mddev *mddev, sector_t sectors)
 	    mddev->array_sectors > newsize)
 		return -EINVAL;
 
-	ret = mddev->bitmap_ops->resize(mddev, sectors, 0, false);
-	if (ret)
-		return ret;
+	if (mddev->bitmap) {
+		ret = mddev->bitmap_ops->resize(mddev, sectors, 0, false);
+		if (ret)
+			return ret;
+	}
 
 	md_set_array_sectors(mddev, newsize);
 	if (sectors > mddev->dev_sectors &&
