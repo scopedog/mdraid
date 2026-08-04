@@ -31,6 +31,7 @@
 #include <linux/types.h>
 #include <linux/string.h>
 #include <linux/export.h>
+#include <asm/bitsperlong.h> // for BITS_PER_LONG
 #else
 #include <limits.h>
 #include <string.h> // for memset
@@ -43,11 +44,33 @@
 /*
  * Below this region length, the cost of building a 256-entry product
  * table outweighs the per-byte gf_mul() work it replaces, so the
- * affected *_base routines fall back to the scalar gf_mul() path. The
- * crossover is platform-dependent; this is a conservative threshold (a
- * region must be at least as long as the table that would be built).
+ * affected *_base routines fall back to the scalar gf_mul() path.
+ *
+ * Building the table costs 256 gf_mul() calls, which is what the direct
+ * path would spend on a 256-byte region on its own, and the table path
+ * then adds a full pass over dest. 256 is therefore a lower bound on
+ * where the table can help, not a safe threshold: measured with
+ * ec_encode_data_base() at k=6/p=2, -O2, a 256-byte region is about 26%
+ * slower through the table than through gf_mul(), and break-even sits
+ * nearer 1 KiB. The crossover is platform-dependent, so round to 1 KiB.
  */
-#define GF_REGION_TBL_MIN_LEN 256
+#define GF_REGION_TBL_MIN_LEN 1024
+
+/*
+ * 64-bit little-endian hosts fill the 32-byte table in
+ * gf_vect_mul_init_base() with four 64-bit stores. __WORDSIZE comes from
+ * glibc's <bits/wordsize.h> and so is only defined in the userspace build;
+ * kernel builds use BITS_PER_LONG, which also covers arm64, ppc64le and
+ * riscv64.
+ */
+#ifdef __KERNEL__
+#define GF_VECT_MUL_INIT_64 (BITS_PER_LONG == 64)
+#elif defined(__x86_64__) || (defined(__WORDSIZE) && __WORDSIZE == 64) ||       \
+        defined(_WIN64)
+#define GF_VECT_MUL_INIT_64 1
+#else
+#define GF_VECT_MUL_INIT_64 0
+#endif
 
 /*
  * Byte-indexed per-coefficient lookup table (256 bytes).
@@ -211,7 +234,7 @@ gf_vect_mul_init_base(unsigned char c, unsigned char *tbl)
         unsigned char c4 = (c2 << 1) ^ ((c2 & 0x80) ? 0x1d : 0); // Mult by GF{2}
         unsigned char c8 = (c4 << 1) ^ ((c4 & 0x80) ? 0x1d : 0); // Mult by GF{2}
 
-#if (defined(__x86_64__) || (defined(__WORDSIZE) && __WORDSIZE == 64) || defined(_WIN64)) && (__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
+#if GF_VECT_MUL_INIT_64 && (__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
         unsigned long long v1, v2, v4, v8, *t;
         unsigned long long v10, v20, v40, v80;
         unsigned char c17, c18, c20, c24;
@@ -308,7 +331,7 @@ gf_vect_mul_init_base(unsigned char c, unsigned char *tbl)
         tbl[30] = c30;
         tbl[31] = c31;
 
-#endif // defined(__x86_64__) || (defined(__WORDSIZE) && __WORDSIZE == 64) || defined(_WIN64)
+#endif // GF_VECT_MUL_INIT_64 && little-endian
 }
 
 void
@@ -316,14 +339,17 @@ gf_vect_dot_prod_base(int len, int vlen, unsigned char *v, unsigned char **src, 
 {
         int i, j;
         unsigned char tbl[256];
+        const unsigned char *s;
 
         /* Short regions: the table build does not pay off (see threshold). */
         if (len < GF_REGION_TBL_MIN_LEN) {
+                unsigned char sum;
+
                 for (i = 0; i < len; i++) {
-                        unsigned char s = 0;
+                        sum = 0;
                         for (j = 0; j < vlen; j++)
-                                s ^= gf_mul(src[j][i], v[j * 32 + 1]);
-                        dest[i] = s;
+                                sum ^= gf_mul(src[j][i], v[j * 32 + 1]);
+                        dest[i] = sum;
                 }
                 return;
         }
@@ -334,14 +360,19 @@ gf_vect_dot_prod_base(int len, int vlen, unsigned char *v, unsigned char **src, 
          * dest; the rest XOR-accumulate.
          */
         build_mul_tbl(v[1], tbl);
-        for (i = 0; i < len; i++)
-                dest[i] = GF_REGION_MUL(tbl, src[0][i]);
+        s = src[0];
+        for (i = 0; i < len; i++) {
+                dest[i] = GF_REGION_MUL(tbl, *s);
+                s++;
+        }
 
         for (j = 1; j < vlen; j++) {
-                const unsigned char *s = src[j];
                 build_mul_tbl(v[j * 32 + 1], tbl);
-                for (i = 0; i < len; i++)
-                        dest[i] ^= GF_REGION_MUL(tbl, s[i]);
+                s = src[j];
+                for (i = 0; i < len; i++) {
+                        dest[i] ^= GF_REGION_MUL(tbl, *s);
+                        s++;
+                }
         }
 }
 
@@ -393,14 +424,16 @@ ec_encode_data_base(int len, int srcs, int dests, unsigned char *v, unsigned cha
          */
         for (l = 0; l < dests; l++) {
                 unsigned char *d = dest[l];
+                const unsigned char *s;
 
                 build_mul_tbl(v[l * srcs * 32 + 1], tbl);
+                s = src[0];
                 for (i = 0; i < len; i++)
-                        d[i] = GF_REGION_MUL(tbl, src[0][i]);
+                        d[i] = GF_REGION_MUL(tbl, s[i]);
 
                 for (j = 1; j < srcs; j++) {
-                        const unsigned char *s = src[j];
                         build_mul_tbl(v[j * 32 + l * srcs * 32 + 1], tbl);
+                        s = src[j];
                         for (i = 0; i < len; i++)
                                 d[i] ^= GF_REGION_MUL(tbl, s[i]);
                 }
@@ -418,6 +451,7 @@ ec_encode_data_update_base(int len, int k, int rows, int vec_i, unsigned char *v
                 for (l = 0; l < rows; l++) {
                         unsigned char c = v[vec_i * 32 + l * k * 32 + 1];
                         unsigned char *d = dest[l];
+
                         for (i = 0; i < len; i++)
                                 d[i] ^= gf_mul(data[i], c);
                 }
@@ -425,12 +459,11 @@ ec_encode_data_update_base(int len, int k, int rows, int vec_i, unsigned char *v
         }
 
         for (l = 0; l < rows; l++) {
+                unsigned char *d = dest[l];
+
                 build_mul_tbl(v[vec_i * 32 + l * k * 32 + 1], tbl);
-                {
-                        unsigned char *d = dest[l];
-                        for (i = 0; i < len; i++)
-                                d[i] ^= GF_REGION_MUL(tbl, data[i]);
-                }
+                for (i = 0; i < len; i++)
+                        d[i] ^= GF_REGION_MUL(tbl, data[i]);
         }
 }
 
