@@ -19,6 +19,10 @@
  *   Q_new = Q_old XOR sum alpha^z * data[z]   for z in [start..stop]
  * Caller pre-positions old P / old Q in ptrs[disks-2] / ptrs[disks-1]
  * and we XOR-accumulate.
+ *
+ * On a host without GFNI the module loads but installs nothing, leaving
+ * the in-tree raid6_call in place; it is the fallback, and it beats the
+ * scalar ec_base path by roughly an order of magnitude.
  */
 
 #include <linux/types.h>
@@ -791,9 +795,23 @@ static int __init raid6_isal_init(void)
 {
 	int ret = isal_install_raid6_call();
 
-	if (ret == 0 && bench)
+	/*
+	 * A host without GFNI is not an error. The in-tree raid6_call we
+	 * declined to override (avx2x4 and friends) is itself the fallback,
+	 * and it is far faster than the scalar ec_base kernels we could
+	 * install instead. Load inert so an unconditional modprobe still
+	 * succeeds on mixed hardware; a failed self-validation (-EINVAL)
+	 * still keeps the module out, since that means GFNI is present but
+	 * producing wrong results.
+	 */
+	if (ret == -ENODEV)
+		return 0;
+	if (ret)
+		return ret;
+
+	if (bench)
 		isal_bench_recov();
-	return ret;
+	return 0;
 }
 
 static void __exit raid6_isal_exit(void)
