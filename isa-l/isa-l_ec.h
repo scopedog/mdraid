@@ -12,6 +12,16 @@
 #ifndef _ISA_L_EC_H_
 #define _ISA_L_EC_H_
 
+/*
+ * Prefixes every symbol declared below with isal_lib_, so isal_lib.ko's
+ * exports cannot collide with another module that vendors this same ISA-L
+ * code under the upstream API names.  Must come first: it has to be in
+ * effect for the declarations here and for the definitions in ec_base.c,
+ * which reaches this file through the erasure_code.h shim.  See
+ * isal_lib_syms.h for the full rationale.
+ */
+#include "isal_lib_syms.h"
+
 #ifdef __KERNEL__
 #include <linux/types.h>
 #else

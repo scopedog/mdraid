@@ -12,6 +12,12 @@
 #   insmod isal_lib.ko
 #   insmod raid_isal.ko       # or isal_test.ko, or kmec.ko
 
+# Every object in this directory is compiled with the isal_lib_ export prefix
+# in force.  isa-l_ec.h includes the same header for consumers outside this
+# Kbuild (md-kmec's raid_km.c); the -include is what reaches the vendored
+# gf_*vect_*_gfni.c kernels, which include no project header of their own.
+ccflags-y        += -include $(src)/isal_lib_syms.h
+
 obj-m            += isal_lib.o
 isal_lib-y       := lib_main.o ec_base.o gfni_glue.o
 isal_lib-y       += gf_vect_dot_prod_avx2_gfni.o

@@ -259,6 +259,33 @@ raid6_isal: installed AVX-512 GFNI gen_syndrome + xor_syndrome (was 'avx2x4')
 See `isa-l/raid6_isal.c` and the `notes/gfni_raid6_integration.md`
 writeup for design and end-to-end test results.
 
+### Symbol prefix on `isal_lib.ko`'s exports
+
+Every symbol `isal_lib.ko` exports is prefixed **`isal_lib_`** —
+`isal_lib_ec_encode_data_base`, `isal_lib_gf_invert_matrix`, and so on.
+
+The ISA-L kernel port under `isa-l/` is vendored, and other out-of-tree
+modules vendor the same code and export it under the upstream ISA-L API
+names.  The kernel cannot arbitrate that: `verify_exported_symbols()` matches
+on the bare symbol name, so the second module to load is rejected outright and
+takes its consumers with it —
+
+```
+insmod: ERROR: could not insert module isal_lib.ko: Invalid module format
+[  138.102767] isal_lib: exports duplicate symbol ec_encode_data_avx2_gfni (owned by ec)
+```
+
+— with the loser decided by nothing but boot order.  Symbol namespaces are not
+a fix: `EXPORT_SYMBOL_NS` adds an import-side check and leaves the name global.
+
+The renaming is done by macro in `isa-l/isal_lib_syms.h`, not by editing
+sources, because `ec_base.c` and the twelve `gf_*vect_*_gfni.c` kernels are
+kept byte-identical to the canonical isa-l tree.  `isa-l_ec.h` includes that
+header and `Kbuild` force-includes it, so **code in this tree and in consumers
+still reads in the plain ISA-L names** — only the ELF symbol table changes.
+Nothing in the build or load procedure differs; the prefix is visible only in
+`Module.symvers`, `nm` output and unresolved-symbol messages.
+
 ### k+m Reed-Solomon personality
 
 The k+m Reed-Solomon md personality (`kmec.ko`) that consumes the
@@ -278,6 +305,7 @@ exports from this tree.
 | Change #13 (`raid_isal.ko` GFNI override: `gen_syndrome`, `xor_syndrome`, 2vect AVX2, AVX-512 fallback) | Done — full-stripe write, RMW partial-stripe write, scrub, fail+rebuild all verified on RHEL 10 + bhyve + i5-1340P. AVX-512 path vendored and integrated but not runtime-tested (no Sapphire Rapids / Ice Lake-SP host); install-time self-validation byte-for-byte against the in-tree impl catches any regression before parity is written. |
 | In-kernel arbitrary k+m Reed-Solomon primitives (`ec_encode_data_avx2_gfni` / `ec_encode_data_avx512_gfni` in `gfni_glue.c`) | Done — verified byte-for-byte against `ec_encode_data_base` for k up to 16, m up to 8. AVX-512 dispatcher built but unexercised (no AVX-512 test host). |
 | Shared `isal_lib.ko` for the ec_base + GFNI primitives | Done — `raid_isal.ko` and `isal_test.ko` link only their unique `.o`; `isal_lib.ko` carries the shared code and exports the public surface via `EXPORT_SYMBOL_GPL`. Also consumed by the `md-kmec` repo. |
+| `isal_lib_` export prefix (no duplicate-symbol collision with other vendors of the same ISA-L code) | Done — all 33 exports prefixed via `isa-l/isal_lib_syms.h`; vendored files untouched. Verified against a colliding module: 13 duplicate exports before, **0** after, both load together in either order. Re-validated on GFNI + AVX-512 (c3-standard-22, Rocky 10.2): `isal_test` k+m AVX2 and AVX-512 PASS, `raid_isal` AVX-512 GFNI install-time self-validation PASS. |
 | Change #15 (auto-default `group_thread_cnt` for raid4/5/6) | Done — new arrays start at `min(2, ncpus/2)` so worker offload is on by default; `default_group_thread_cnt` module param overrides. Validated on rd07: seq-write +24 %, scrub +51 %, rebuild +34 % vs stock; deltas are larger again with `raid_isal` (#13) layered on top. Caps at 2 because raid5d retains ~45 % CPU even after offload (next bottleneck is its irreducible completion-path / `device_lock` work). |
 
 ## License
