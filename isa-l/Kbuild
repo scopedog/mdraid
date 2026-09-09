@@ -7,6 +7,7 @@
 #                   isal_lib symbols.
 #   raid_isal.ko  - overrides raid6_call.gen_syndrome / xor_syndrome
 #                   with GFNI implementations using isal_lib's exports.
+#                   x86 only; see the CONFIG_X86 guard below.
 #
 # Loading order on a fresh boot:
 #   insmod isal_lib.ko
@@ -20,6 +21,18 @@ ccflags-y        += -include $(src)/isal_lib_syms.h
 
 obj-m            += isal_lib.o
 isal_lib-y       := lib_main.o ec_base.o gfni_glue.o
+
+# test_main.c is arch-neutral and gates its GFNI cases on isal_have_gfni(),
+# so isal_test.ko is built everywhere -- on non-x86 it exercises ec_base.
+obj-m            += isal_test.o
+isal_test-y      := test_main.o
+
+# GFNI is an x86 ISA extension: the vendored kernels and raid_isal.ko are
+# built on x86 only.  Elsewhere isal_lib is ec_base's scalar path plus the
+# gfni_glue.c stubs, whose isal_have_gfni() returns false so every consumer
+# dispatches to that path on its own.
+ifdef CONFIG_X86
+
 isal_lib-y       += gf_vect_dot_prod_avx2_gfni.o
 isal_lib-y       += gf_2vect_dot_prod_avx2_gfni.o
 isal_lib-y       += gf_3vect_dot_prod_avx2_gfni.o
@@ -32,9 +45,6 @@ isal_lib-y       += gf_6vect_dot_prod_avx512_gfni.o
 isal_lib-y       += gf_vect_mad_avx2_gfni.o
 isal_lib-y       += gf_2vect_mad_avx2_gfni.o
 isal_lib-y       += gf_2vect_mad_avx512_gfni.o
-
-obj-m            += isal_test.o
-isal_test-y      := test_main.o
 
 obj-m            += raid_isal.o
 raid_isal-y      := raid6_isal.o
@@ -64,3 +74,5 @@ CFLAGS_gf_6vect_dot_prod_avx512_gfni.o += $(ISAL_GFNI_CFLAGS)
 CFLAGS_gf_vect_mad_avx2_gfni.o         += $(ISAL_GFNI_CFLAGS)
 CFLAGS_gf_2vect_mad_avx2_gfni.o        += $(ISAL_GFNI_CFLAGS)
 CFLAGS_gf_2vect_mad_avx512_gfni.o      += $(ISAL_GFNI_CFLAGS)
+
+endif # CONFIG_X86

@@ -24,6 +24,12 @@
 
 #include "isa-l_ec.h"
 
+/*
+ * The GFNI kernels are x86-only; on other architectures isal_lib is the
+ * ec_base scalar path alone and there are no trampolines to export.
+ */
+#ifdef CONFIG_X86
+
 extern void
 gf_vect_dot_prod_avx2_gfni(int len, int vec, unsigned char *gftbls,
 			   unsigned char **src, unsigned char *dest);
@@ -73,6 +79,8 @@ EXPORT_SYMBOL_GPL(gf_6vect_dot_prod_avx512_gfni);
 EXPORT_SYMBOL_GPL(gf_vect_mad_avx2_gfni);
 EXPORT_SYMBOL_GPL(gf_2vect_mad_avx2_gfni);
 EXPORT_SYMBOL_GPL(gf_2vect_mad_avx512_gfni);
+
+#endif /* CONFIG_X86 */
 
 static int __init isal_lib_init(void)
 {

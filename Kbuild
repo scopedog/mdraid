@@ -5,5 +5,6 @@
 raid456-y	+= md/raid5.o md/raid5-cache.o md/raid5-ppl.o
 
 obj-m		+= md/raid0.o
+obj-m		+= md/dm-raid.o
 obj-m		+= raid456.o
 obj-m		+= isa-l/

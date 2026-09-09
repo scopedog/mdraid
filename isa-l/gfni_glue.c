@@ -11,16 +11,32 @@
  *
  * gf_vect_mul_init_gfni and ec_init_tables_gfni are vendored from
  * https://github.com/scopedog/isa-l/blob/master/erasure_code/ec_highlevel_func.c
+ *
+ * GFNI is an x86 ISA extension, so everything that touches the vendored
+ * kernels is built only on CONFIG_X86.  On other architectures this file
+ * still provides the full symbol set: isal_have_gfni() /
+ * isal_have_avx512_gfni() return false, so callers take the ec_base
+ * scalar path exactly as they do on a non-GFNI x86 host, and the
+ * dispatchers below are unreachable stubs kept only so consumers
+ * (raid_km.c) link without arch #ifdefs of their own.  The two table
+ * helpers are pure C and are built everywhere -- ec_base's scalar path
+ * shares the g_tbls layout.
  */
 
 #include <linux/types.h>
 #include <linux/string.h>
 #include <linux/export.h>
+#ifdef CONFIG_X86
 #include <asm/cpufeature.h>
 #include <asm/fpu/api.h>
+#else
+#include <linux/bug.h>
+#endif
 
 #include "isa-l_ec.h"
 #include "ec_base.h"   /* for gf_table_gfni[] */
+
+#ifdef CONFIG_X86
 
 extern void
 gf_vect_dot_prod_avx2_gfni(int len, int vec, unsigned char *gftbls,
@@ -89,6 +105,24 @@ isal_have_avx512_gfni(void)
 }
 EXPORT_SYMBOL_GPL(isal_have_avx512_gfni);
 
+#else /* !CONFIG_X86 */
+
+bool
+isal_have_gfni(void)
+{
+	return false;
+}
+EXPORT_SYMBOL_GPL(isal_have_gfni);
+
+bool
+isal_have_avx512_gfni(void)
+{
+	return false;
+}
+EXPORT_SYMBOL_GPL(isal_have_avx512_gfni);
+
+#endif /* CONFIG_X86 */
+
 void
 gf_vect_mul_init_gfni(unsigned char c, unsigned char *tbl)
 {
@@ -112,6 +146,8 @@ ec_init_tables_gfni(int k, int rows, unsigned char *a, unsigned char *g_tbls)
 	}
 }
 EXPORT_SYMBOL_GPL(ec_init_tables_gfni);
+
+#ifdef CONFIG_X86
 
 void
 gf_vect_dot_prod_gfni(int len, int vec, unsigned char *g_tbls,
@@ -255,3 +291,54 @@ ec_encode_data_update_avx512_gfni(int len, int k, int rows, int vec_i,
 	kernel_fpu_end();
 }
 EXPORT_SYMBOL_GPL(ec_encode_data_update_avx512_gfni);
+
+#else /* !CONFIG_X86 */
+
+/*
+ * Unreachable on non-x86: isal_have_gfni() is false, so every caller
+ * takes the ec_base scalar path.  WARN loudly rather than silently
+ * leaving parity buffers untouched if one ever slips through.
+ */
+void
+gf_vect_dot_prod_gfni(int len, int vec, unsigned char *g_tbls,
+                      unsigned char **src, unsigned char *dest)
+{
+	WARN_ONCE(1, "isal_lib: GFNI dot-product called on a non-x86 host\n");
+}
+EXPORT_SYMBOL_GPL(gf_vect_dot_prod_gfni);
+
+void
+ec_encode_data_avx2_gfni(int len, int k, int rows, unsigned char *g_tbls,
+                         unsigned char **data, unsigned char **coding)
+{
+	WARN_ONCE(1, "isal_lib: GFNI encode called on a non-x86 host\n");
+}
+EXPORT_SYMBOL_GPL(ec_encode_data_avx2_gfni);
+
+void
+ec_encode_data_avx512_gfni(int len, int k, int rows, unsigned char *g_tbls,
+                           unsigned char **data, unsigned char **coding)
+{
+	WARN_ONCE(1, "isal_lib: GFNI encode called on a non-x86 host\n");
+}
+EXPORT_SYMBOL_GPL(ec_encode_data_avx512_gfni);
+
+void
+ec_encode_data_update_avx2_gfni(int len, int k, int rows, int vec_i,
+                                unsigned char *g_tbls, unsigned char *data,
+                                unsigned char **coding)
+{
+	WARN_ONCE(1, "isal_lib: GFNI parity update called on a non-x86 host\n");
+}
+EXPORT_SYMBOL_GPL(ec_encode_data_update_avx2_gfni);
+
+void
+ec_encode_data_update_avx512_gfni(int len, int k, int rows, int vec_i,
+                                  unsigned char *g_tbls, unsigned char *data,
+                                  unsigned char **coding)
+{
+	WARN_ONCE(1, "isal_lib: GFNI parity update called on a non-x86 host\n");
+}
+EXPORT_SYMBOL_GPL(ec_encode_data_update_avx512_gfni);
+
+#endif /* CONFIG_X86 */
