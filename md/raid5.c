@@ -253,8 +253,28 @@ static void do_release_stripe(struct r5conf *conf, struct stripe_head *sh,
 	}
 
 	if (test_bit(STRIPE_HANDLE, &sh->state)) {
+		/*
+		 * A stripe the sync thread is waiting on must not wait for the
+		 * preread throttle.  delayed_list is only activated once
+		 * preread_active_stripes falls below IO_THRESHOLD, which a
+		 * saturating small-write load can keep from happening for
+		 * minutes; md_do_sync() meanwhile waits for recovery_active to
+		 * drain, so one DELAYED stripe that also carries a sync request
+		 * stops the whole resync/recovery.
+		 *
+		 * A write-back cache keeps the old behaviour.  There
+		 * STRIPE_DELAYED is also how a stripe parks itself to wait for
+		 * the shared extra_page (handle_stripe_dirtying() returning
+		 * -EAGAIN, with no I/O issued and nothing that clears the
+		 * wait), and STRIPE_SYNC_REQUESTED is left set while cached
+		 * data is flushed -- so such a stripe would go straight back
+		 * to handle_list and spin raid5d until the page came free.
+		 */
 		if (test_bit(STRIPE_DELAYED, &sh->state) &&
-		    !test_bit(STRIPE_PREREAD_ACTIVE, &sh->state))
+		    !test_bit(STRIPE_PREREAD_ACTIVE, &sh->state) &&
+		    (r5c_is_writeback(conf->log) ||
+		     (!test_bit(STRIPE_SYNC_REQUESTED, &sh->state) &&
+		      !test_bit(STRIPE_SYNCING, &sh->state))))
 			list_add_tail(&sh->lru, &conf->delayed_list);
 		else if (test_bit(STRIPE_BIT_DELAY, &sh->state) &&
 			   sh->bm_seq - conf->seq_write > 0)
