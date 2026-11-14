@@ -522,8 +522,14 @@ struct mddev {
 	 * padding before recovery_wait (8-byte aligned) occupy the same 8 bytes
 	 * an atomic64_t does, so recovery_wait@616 and sizeof(mddev)==2080 are
 	 * identical either way.  Keeping atomic64_t also stays consistent with
-	 * md.c's atomic64_* uses of this field (md.c isn't built into raidkm.ko,
-	 * which never accesses recovery_active directly). */
+	 * md.c's atomic64_* uses of this field (md.c isn't built into raidkm.ko).
+	 * The width differs, though, so raidkm.ko must not use atomic64_* on it:
+	 * the builtin md core updates only the low 4 bytes, with 32-bit atomics.
+	 * raidkm does touch the field (declustered sync credit, the --checksum
+	 * resync kick), always through raidkm_recovery_active_add/_read() in
+	 * md-kmec's compat-rhel10.h, which cast it to atomic_t; md-kmec's
+	 * check-mddev-abi.sh fails the build unless the running kernel's
+	 * field is 4 bytes. */
 	atomic64_t			recovery_active; /* sectors scheduled, but not written */
 	wait_queue_head_t		recovery_wait;
 	sector_t			recovery_cp;
